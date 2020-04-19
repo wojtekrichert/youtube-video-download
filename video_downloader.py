@@ -1,6 +1,8 @@
+import json
 import os
 
 import click
+import requests
 from pytube import YouTube
 
 VIDEO_PATH = "./videos"
@@ -11,6 +13,13 @@ class VideoDownloaderException(Exception):
 
 
 class VideoDownloader(object):
+    def __init__(self, api_key=None):
+        """
+        :param api_key: YouTube api key
+        """
+        self.api_key = api_key
+        self.base_api_url = "https://www.googleapis.com/youtube/v3/search"
+        self.yt_base_url = "https://www.youtube.com/"
 
     @staticmethod
     def get_video(url: str) -> YouTube:
@@ -40,18 +49,50 @@ class VideoDownloader(object):
         stream = yt.streams.filter(mime_type="video/mp4", progressive=True).order_by('resolution').first()
         return stream.download(download_path, filename_prefix=stream.resolution)
 
+    def get_channel_videos_links(self, channel_id: str) -> list:
+        """
+        Get list of videos on given channel.
+        :param channel_id: YouTube channel ID
+        :return: list of urls to videos
+        """
+        base_url = f"{self.base_api_url}?order=date&part=snippet&channelId={channel_id}&maxResults=25&key={self.api_key}"
+        url = str(base_url)
+        all_videos = []
 
-@click.command()
-@click.argument("url")
-def main(url: str) -> None:
+        while url:
+            response = requests.get(url)
+            data = json.loads(response.text)
+            if response.status_code is not requests.codes.ok:
+                raise VideoDownloaderException(
+                    f"Error occurred during GET request for channel {self.yt_base_url}channel/{channel_id}:\n"
+                    f"{data['error']['message']}")
+
+            for video in data["items"]:
+                all_videos.append(f"{self.yt_base_url}watch?v={video['id']['videoId']}")
+
+            next_page_token = data.get("nextPageToken")
+            url = f"{base_url}&pageToken={next_page_token}" if next_page_token else None
+        return all_videos
+
+
+@click.command(help="App for downloading videos from Youtube.")
+@click.option("--url", type=str, help="Single video url")
+@click.option("--channel", type=str, help="Channel url")
+@click.option("--api_key", type=str, help="YouTube API key, to generate -> https://www.youtube.com/watch?v=VqML5F8hcRQ")
+def _main(url: str, channel: str, api_key: str) -> None:
     try:
         click.echo(f"Creating video folder: {VIDEO_PATH}.")
         os.mkdir(VIDEO_PATH)
     except FileExistsError:
         pass
-    downloader = VideoDownloader()
-    downloader.download_video(url)
+
+    downloader = VideoDownloader(api_key)
+    if url is not None:
+        downloader.download_video(url)
+    if channel is not None and api_key is not None:
+        channel = channel.split("/")[-1]
+        downloader.get_channel_videos_links(channel)
 
 
 if __name__ == '__main__':
-    main()
+    _main()

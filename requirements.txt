@@ -1,2 +1,4 @@
 pytube3
+python-youtube
 click
+requests
