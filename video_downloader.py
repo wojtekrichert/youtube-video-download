@@ -1,5 +1,6 @@
 import json
 import os
+from typing import Generator
 
 import click
 import requests
@@ -15,6 +16,7 @@ class VideoDownloaderException(Exception):
 class VideoDownloader(object):
     def __init__(self, api_key=None):
         """
+        Class for interacting with YouTube API for downloading videos.
         :param api_key: YouTube api key
         """
         self.api_key = api_key
@@ -49,7 +51,7 @@ class VideoDownloader(object):
         stream = yt.streams.filter(mime_type="video/mp4", progressive=True).order_by('resolution').first()
         return stream.download(download_path, filename_prefix=stream.resolution)
 
-    def get_channel_videos_links(self, channel_id: str) -> list:
+    def get_channel_videos_links(self, channel_id: str) -> Generator[str, None, None]:
         """
         Get list of videos on given channel.
         :param channel_id: YouTube channel ID
@@ -57,7 +59,6 @@ class VideoDownloader(object):
         """
         base_url = f"{self.base_api_url}?order=date&part=snippet&channelId={channel_id}&maxResults=25&key={self.api_key}"
         url = str(base_url)
-        all_videos = []
 
         while url:
             response = requests.get(url)
@@ -68,11 +69,19 @@ class VideoDownloader(object):
                     f"{data['error']['message']}")
 
             for video in data["items"]:
-                all_videos.append(f"{self.yt_base_url}watch?v={video['id']['videoId']}")
+                yield f"{self.yt_base_url}watch?v={video['id']['videoId']}"
 
             next_page_token = data.get("nextPageToken")
             url = f"{base_url}&pageToken={next_page_token}" if next_page_token else None
-        return all_videos
+
+    def download_all_videos_from_channel(self, channel_url: str) -> None:
+        """
+        Download all videos on given channel url.
+        :param channel_url: url for channel on YT
+        """
+        channel_id = channel_url.split("/")[-1]
+        for video_url in self.get_channel_videos_links(channel_id):
+            self.download_video(video_url)
 
 
 @click.command(help="App for downloading videos from Youtube.")
@@ -90,8 +99,7 @@ def _main(url: str, channel: str, api_key: str) -> None:
     if url is not None:
         downloader.download_video(url)
     if channel is not None and api_key is not None:
-        channel = channel.split("/")[-1]
-        downloader.get_channel_videos_links(channel)
+        downloader.download_all_videos_from_channel(channel)
 
 
 if __name__ == '__main__':
